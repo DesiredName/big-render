@@ -26,6 +26,18 @@
                         @click="use_batching = !use_batching"
                     >
                 </label><br>
+                <label
+                    for="do_not_use_idle"
+                    class="select-none"
+                >
+                    Use plain timer instead of idle callback: <input
+                        id="do_not_use_idle"
+                        :checked="do_not_use_idle"
+                        :disabled="is_loading"
+                        type="checkbox"
+                        @click="do_not_use_idle = !do_not_use_idle"
+                    >
+                </label><br>
                 <button
                     class="m-2 px-2 rounded-lg text-blue-600 bg-slate-100 hover:bg-slate-400"
                     :class="{ 'bg-slate-500 text-blue-800': is_loading }"
@@ -80,7 +92,7 @@
 </script>
 
 <script setup lang="ts">
-import type { WorkerInputMessages, WorkerOutputMessages } from './assets/worker';
+import type { WorkerInputMessages, WorkerOutputMessages } from './workers/worker.js';
 
 export type Entry = {
     id: string;
@@ -88,14 +100,15 @@ export type Entry = {
     subitems: string[];
 };
 
-const { $worker } = useNuxtApp();
 const number_of_nodes = ref<number>(10);
 const use_batching = ref<boolean>(false);
-const idle_callback_id = ref<number | null>(null);
+const do_not_use_idle = ref<boolean>(false);
+const draw_callback_id = ref<number | null>(null);
 const entries = ref<Array<Entry>>([]);
 const displayed_entries = ref<Array<Entry>>([]);
-const worker = $worker.create('/../_nuxt/assets/worker.js');
 const is_loading = ref<boolean>(false);
+
+const worker = new Worker(new URL('./workers/worker.js', import.meta.url), { type: 'module', credentials: 'same-origin' });
 
 worker.onmessage = (e: MessageEvent<WorkerOutputMessages>) => {
     switch (e.data.name) {
@@ -104,7 +117,7 @@ worker.onmessage = (e: MessageEvent<WorkerOutputMessages>) => {
             displayed_entries.value = [];
 
             if (use_batching.value === true) {
-                add_displayed_in_batches(100);
+                update(100);
             }
             else {
                 displayed_entries.value = entries.value.splice(0);
@@ -120,20 +133,27 @@ const generate_entries = () => {
 };
 
 const stop_rendering = () => {
-    if (idle_callback_id.value) {
-        cancelIdleCallback(idle_callback_id.value);
+    if (draw_callback_id.value) {
+        cancelIdleCallback(draw_callback_id.value);
     }
     is_loading.value = false;
 };
 
-const add_displayed_in_batches = (batch: number) => {
+const update = (batch: number) => {
     displayed_entries.value.push(...entries.value.splice(0, batch));
 
-    if (entries.value.length > 0) {
-        idle_callback_id.value = requestIdleCallback(() => add_displayed_in_batches(batch));
+    if (entries.value.length <= 0) {
+        is_loading.value = false;
+        return;
+    }
+
+    if (do_not_use_idle.value === true) {
+        draw_callback_id.value = window.setTimeout(() => {
+            update(batch);
+        }, 300);
     }
     else {
-        is_loading.value = false;
+        draw_callback_id.value = requestIdleCallback(() => update(batch));
     }
 };
 </script>
